@@ -1,11 +1,13 @@
 package main
 
 type Packet struct {
-	seq_num int
 	src     int
 	dst     int
+	seq_num int
+    size_byte int
+
 	ttl     int
-	sent_ts int
+	sent_ts int64
 }
 
 type Flow struct {
@@ -33,6 +35,7 @@ func (flow *Flow) NextPacket() *Packet {
 		dst:     flow.dst,
 		ttl:     10,
 		sent_ts: loop.time,
+        size_byte : BYTES_PER_PACKET,
 	}
 	flow.next_seq++
 
@@ -41,7 +44,7 @@ func (flow *Flow) NextPacket() *Packet {
 
 func MakeFlow() *Flow {
 	flow := &Flow{}
-	flow.size_bytes = BYTES_PER_PACKET * 10
+	flow.size_bytes = BYTES_PER_PACKET * 200
 
 	return flow
 }

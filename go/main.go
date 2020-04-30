@@ -3,17 +3,24 @@ package main
 import "fmt"
 
 func main() {
-	nic := MakeNIC()
-	fmt.Printf("Hey %#v\n", nic)
-
 	InitQueue()
 
-	fmt.Println("call...")
-	FnA()
-	FnB()
+	fmt.Println("setup...")
+	nic := MakeNIC()
+    flow := MakeFlow()
 
-	fmt.Println("run...")
+    for {
+        pkt := flow.NextPacket()
+        if pkt == nil {
+            break
+        }
+        loop.CallIn(0, func() { nic.Enque(pkt) } )
+    }
+
+    // start
+	fmt.Println("start...")
 	loop.Run()
 
+    fmt.Println(nic.count, " packets processed")
 	fmt.Println("done")
 }

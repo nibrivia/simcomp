@@ -1,10 +1,11 @@
 package main
 
 import "fmt"
+//import "sync"
 import "container/heap"
 
 type Event struct {
-	time int
+	time int64
 	//index  int
 	action func()
 }
@@ -12,8 +13,8 @@ type Event struct {
 type PriorityQueue []*Event
 
 type EventLoop struct {
-	time  int
-	limit int
+	time  int64
+	limit int64
 
 	stop bool
 
@@ -39,7 +40,7 @@ func (pq *PriorityQueue) Pop() interface{} {
 	old := *pq
 	n := len(old)
 	item := old[n-1]
-	old[n-1] = nil // avoid memory leak
+	//old[n-1] = nil // avoid memory leak
 	*pq = old[0 : n-1]
 	return item
 }
@@ -52,45 +53,53 @@ func InitQueue() {
 	loop.stop = false
 
 	// heap
-	loop.queue = make(PriorityQueue, 0)
+	loop.queue = make(PriorityQueue, 0, 1000)
 	heap.Init(&loop.queue)
 
-	loop.limit = 100
+	loop.limit = 10e9
+}
+
+func (loop *EventLoop) Time() string {
+    time_ms := loop.time/1e6
+    time_us := loop.time/1e3 % 1e3
+    time_ns := loop.time % 1e3
+    return fmt.Sprintf("%5d.%3d.%3d", time_ms, time_us, time_ns)
 }
 
 func (loop *EventLoop) Run() {
+    var event *Event
 	for {
-
 		// check that things are okay
 		if loop.queue.Len() == 0 {
-			fmt.Println("no more events")
-			return
-		}
-		if loop.stop {
-			fmt.Println("Stop received")
+			fmt.Println(loop.Time(), " no more events")
 			return
 		}
 
 		// find the next event, update state
-		event := heap.Pop(&loop.queue).(*Event)
+		event = heap.Pop(&loop.queue).(*Event)
 		loop.time = event.time
 
 		if loop.time > loop.limit {
-			fmt.Println("past time limit")
+			fmt.Println(loop.Time(), " past time limit")
 			return
 		}
 
 		// run the event
-		//fmt.Printf("%d exec %#v\n", loop.time, event)
-		event.action()
+        //fmt.Printf("%v exec %#v\n", loop.Time(), event)
+        event.action()
 	}
 }
 
-func (loop *EventLoop) CallIn(delay int, fn func()) {
-	loop.ScheduleAt(loop.time+delay, fn)
+func (loop *EventLoop) CallIn(delay int64, fn func()) {
+	e := Event{
+		time:   loop.time+delay,
+		action: fn,
+	}
+
+	heap.Push(&loop.queue, &e)
 }
 
-func (loop *EventLoop) ScheduleAt(time int, fn func()) {
+func (loop *EventLoop) ScheduleAt(time int64, fn func()) {
 	e := Event{
 		time:   time,
 		action: fn,
