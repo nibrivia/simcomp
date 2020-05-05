@@ -63,11 +63,6 @@ impl Scheduler {
 }
 
 
-fn hello(s: String) {
-    println!("hi {}!", s);
-}
-
-
 
 struct Packet {
     src: u32,
@@ -121,6 +116,53 @@ impl Iterator for Flow {
         } else {
             None
         }
+    }
+}
+
+
+struct NIC {
+    latency_ns: u64,
+    ns_per_byte: u64,
+    enabled: bool,
+    count: u64,
+    queue: Vec<Packet>,
+
+    scheduler: Box<Scheduler>
+}
+
+impl NIC {
+    pub fn new(s: Box<Scheduler>) -> NIC {
+        NIC {
+            latency_ns: 10,
+            ns_per_byte: 1,
+            enabled: false,
+            count : 0,
+            queue : Vec::new(),
+            scheduler: s,
+        }
+    }
+
+    pub fn enq(&mut self, p: Packet) {
+        println!("Received packet!");
+
+        self.queue.push(p);
+        self.count += 1;
+
+        // attempt send
+        self.send(false);
+    }
+
+    pub fn send(&mut self, enable: bool) {
+        self.enabled = self.enabled | enable;
+        if !self.enabled || self.queue.len() == 0 {
+            return
+        }
+
+        let p = self.queue.remove(0);
+        self.enabled = false;
+
+        let reenable = || {self.send(true)};
+        self.scheduler.call_in(1500, Box::new(reenable));
     }
 }
 
