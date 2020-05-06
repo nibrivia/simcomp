@@ -1,6 +1,8 @@
 use std::collections::BinaryHeap;
 use std::collections::VecDeque;
 use std::cmp::Ordering;
+use radix_heap::RadixHeapMap;
+
 // use std::cmp::Reverse;
 
 enum EventType {
@@ -36,7 +38,8 @@ impl Eq for Event {} // don't use function
 struct Scheduler {
     time: u64,
     limit: u64,
-    queue: BinaryHeap<Event>,
+    //queue: BinaryHeap<Event>,
+    queue: RadixHeapMap<i64, Event>,
 
     // network elements
     NICs: Vec<NIC>,
@@ -49,8 +52,9 @@ impl Scheduler {
 
         Scheduler {
             time : 0,
-            limit: 10_000_000_000,
-            queue : BinaryHeap::new(),
+            limit: 100_000_000_000,
+            //queue : BinaryHeap::new(),
+            queue : RadixHeapMap::new(),
 
             NICs: nics,
         }
@@ -62,22 +66,21 @@ impl Scheduler {
 
     pub fn call_at(&mut self, time: u64, event_type : EventType) {
         let event = Event { time: time, event_type: event_type};
-        self.queue.push(event);
+        self.queue.push(-(time as i64), event);
         //println!("will do thing at {}", time)
     }
 
     pub fn run(&mut self) {
-        println!("Start!");
         while self.queue.len() > 0 && self.time < self.limit {
-            let event = self.queue.pop().unwrap();
+            let tuple = self.queue.pop().unwrap();
+            let event = tuple.1;
             self.time = event.time;
 
             let events = match event.event_type {
-                EventType::NICRx {nic, packet} => self.NICs[nic].enq(self.time, packet),
-                EventType::NICEnable {nic} => self.NICs[nic].send(self.time, true),
+                EventType::NICRx {nic, packet} => self.NICs[nic].enq(self.time, &mut self.queue, packet),
+                EventType::NICEnable {nic} => self.NICs[nic].send(self.time, &mut self.queue, true),
             };
 
-            self.queue.extend(events);
 
         }
         println!("{}", self.NICs[0].count);
@@ -161,26 +164,21 @@ impl NIC {
         }
     }
 
-    pub fn enq(&mut self, time: u64, p: Packet) -> Vec<Event> {
+    pub fn enq(&mut self, time: u64, event_queue: &mut RadixHeapMap<i64, Event>, p: Packet) {
         //println!("Received packet #{}!", p.seq_num);
 
         self.queue.push_back(p);
         self.count += 1;
 
         // attempt send
-        if self.enabled {
-            return self.send(time, false);
-        } else {
-            Vec::new()
-        }
+        self.send(time, event_queue, false);
     }
 
-    pub fn send(&mut self, time: u64, enable: bool) -> Vec<Event> {
+    pub fn send(&mut self, time: u64, event_queue: &mut RadixHeapMap<i64, Event>, enable: bool) {
         self.enabled = self.enabled | enable;
-        let mut events: Vec<Event> = Vec::new();
 
         if !self.enabled || self.queue.len() == 0 {
-            return events
+            return
         }
 
         let packet = self.queue.pop_front().unwrap();
@@ -188,11 +186,12 @@ impl NIC {
         self.enabled = false;
 
 
-        events.push(Event{time: time+1500, event_type: EventType::NICEnable{nic: 0}});
-        events.push(Event{time: time+1510, event_type: EventType::NICRx{nic: 0, packet}});
+        //scheduler.call_in(1500, EventType::NICEnable{nic: 0});
+        //scheduler.call_in(1510, EventType::NICRx{nic: 0, packet});
+        event_queue.push(-(time as i64+1500), Event{time: time+1500, event_type: EventType::NICEnable{nic: 0}});
+        event_queue.push(-(time as i64+1510), Event{time: time+1510, event_type: EventType::NICRx{nic: 0, packet}});
         //let reenable = || {self.send(true)};
         //self.scheduler.call_in(1500, Box::new(reenable));
-        return events
     }
 }
 
@@ -206,15 +205,6 @@ fn main() {
     }
     s.call_in(0, EventType::NICEnable{nic: 0});
 
-
-    /*
-    let test_ref = &mut || {hello("10".to_string())};
-    s.call_in(10, test_ref);
-
-    //let test_ref = &mut test;
-    let test_ref = &mut || {hello("1".to_string())};
-    s.call_in(1, test_ref);
-    */
 
     s.run();
 
