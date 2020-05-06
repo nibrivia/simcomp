@@ -1,10 +1,17 @@
 use std::collections::BinaryHeap;
+use std::collections::VecDeque;
 use std::cmp::Ordering;
 // use std::cmp::Reverse;
 
+enum EventType {
+    NICRx {nic: usize, packet: Packet},
+    NICEnable { nic: usize },
+}
+
 struct Event {
     time: u64,
-    function: Box<dyn FnOnce() -> ()>,
+    event_type: EventType,
+    //function: Box<dyn FnOnce() -> ()>,
 }
 
 impl Ord for Event {
@@ -30,25 +37,33 @@ struct Scheduler {
     time: u64,
     limit: u64,
     queue: BinaryHeap<Event>,
+
+    // network elements
+    NICs: Vec<NIC>,
 }
 
 impl Scheduler {
     pub fn new() -> Scheduler {
+        let mut nics = Vec::new();
+        nics.push(NIC::new());
+
         Scheduler {
             time : 0,
-            limit: 1000,
-            queue : BinaryHeap::new()
+            limit: 10_000_000_000,
+            queue : BinaryHeap::new(),
+
+            NICs: nics,
         }
     }
 
-    pub fn call_in(&mut self, delay: u64, call: Box<dyn FnOnce() -> ()>) {
-        self.call_at(self.time+delay, call)
+    pub fn call_in(&mut self, delay: u64, event_type: EventType) {
+        self.call_at(self.time+delay, event_type)
     }
 
-    pub fn call_at(&mut self, time: u64, call: Box<dyn FnOnce() -> ()>) {
-        let event = Event { time: time, function: call};
+    pub fn call_at(&mut self, time: u64, event_type : EventType) {
+        let event = Event { time: time, event_type: event_type};
         self.queue.push(event);
-        println!("will do thing at {}", time)
+        //println!("will do thing at {}", time)
     }
 
     pub fn run(&mut self) {
@@ -57,8 +72,15 @@ impl Scheduler {
             let event = self.queue.pop().unwrap();
             self.time = event.time;
 
-            (event.function)();
+            let events = match event.event_type {
+                EventType::NICRx {nic, packet} => self.NICs[nic].enq(self.time, packet),
+                EventType::NICEnable {nic} => self.NICs[nic].send(self.time, true),
+            };
+
+            self.queue.extend(events);
+
         }
+        println!("{}", self.NICs[0].count);
     }
 }
 
@@ -125,44 +147,52 @@ struct NIC {
     ns_per_byte: u64,
     enabled: bool,
     count: u64,
-    queue: Vec<Packet>,
-
-    scheduler: Box<Scheduler>
+    queue: VecDeque<Packet>,
 }
 
 impl NIC {
-    pub fn new(s: Box<Scheduler>) -> NIC {
+    pub fn new() -> NIC {
         NIC {
             latency_ns: 10,
             ns_per_byte: 1,
             enabled: false,
             count : 0,
-            queue : Vec::new(),
-            scheduler: s,
+            queue : VecDeque::new(),
         }
     }
 
-    pub fn enq(&mut self, p: Packet) {
-        println!("Received packet!");
+    pub fn enq(&mut self, time: u64, p: Packet) -> Vec<Event> {
+        //println!("Received packet #{}!", p.seq_num);
 
-        self.queue.push(p);
+        self.queue.push_back(p);
         self.count += 1;
 
         // attempt send
-        self.send(false);
+        if self.enabled {
+            return self.send(time, false);
+        } else {
+            Vec::new()
+        }
     }
 
-    pub fn send(&mut self, enable: bool) {
+    pub fn send(&mut self, time: u64, enable: bool) -> Vec<Event> {
         self.enabled = self.enabled | enable;
+        let mut events: Vec<Event> = Vec::new();
+
         if !self.enabled || self.queue.len() == 0 {
-            return
+            return events
         }
 
-        let p = self.queue.remove(0);
+        let packet = self.queue.pop_front().unwrap();
+        //println!("Sending packet #{}", packet.seq_num);
         self.enabled = false;
 
-        let reenable = || {self.send(true)};
-        self.scheduler.call_in(1500, Box::new(reenable));
+
+        events.push(Event{time: time+1500, event_type: EventType::NICEnable{nic: 0}});
+        events.push(Event{time: time+1510, event_type: EventType::NICRx{nic: 0, packet}});
+        //let reenable = || {self.send(true)};
+        //self.scheduler.call_in(1500, Box::new(reenable));
+        return events
     }
 }
 
@@ -172,11 +202,9 @@ fn main() {
 
     let f = Flow::new();
     for packet in f {
-        //println!("Packet#{} {}->{}", packet.seq_num, packet.src, packet.dst);
-        let t = packet.seq_num;
-        let print_packet = || { let p = packet; println!("Packet#{} {}->{}", p.seq_num, p.src, p.dst); };
-        s.call_in(t, Box::new(print_packet));
+        s.call_in(0, EventType::NICRx{nic: 0, packet});
     }
+    s.call_in(0, EventType::NICEnable{nic: 0});
 
 
     /*
